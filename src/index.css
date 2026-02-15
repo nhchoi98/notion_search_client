@@ -1,0 +1,11 @@
+:root {
+  font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
