@@ -1,48 +1,57 @@
-import { useMemo, useState } from 'react';
-import { FormControl, FormControlLabel, FormLabel, Radio, RadioGroup, Button, Card, CardContent, Stack, Typography, Chip } from '@mui/material';
+import { useState } from 'react';
+import { Button, Card, CardContent, Stack, TextField, Typography, Alert } from '@mui/material';
 import type { MCPMode } from '../types/mcp';
 
 interface MCPSetupProps {
-  onSelect: (mode: MCPMode) => void;
+  onSelect: (mode: MCPMode, localEndpoint: string) => void;
 }
 
-export default function MCPSetup({ onSelect }: MCPSetupProps) {
-  const [mode, setMode] = useState<MCPMode>('local');
+const DEFAULT_ENDPOINT = 'http://localhost:3001/mcp';
 
-  const chipLabel = useMemo(() => {
-    return mode === 'local'
-      ? '현재 선택: LOCAL MCP(기본)'
-      : '현재 선택: NOTION MCP';
-  }, [mode]);
+export default function MCPSetup({ onSelect }: MCPSetupProps) {
+  const [localEndpoint, setLocalEndpoint] = useState(DEFAULT_ENDPOINT);
+  const [error, setError] = useState('');
+
+  const handleConnectLocalMCP = () => {
+    setError('');
+    if (!localEndpoint.trim()) {
+      setError('로컬 MCP 엔드포인트를 입력해주세요.');
+      return;
+    }
+
+    try {
+      new URL(localEndpoint);
+    } catch {
+      setError('올바른 URL 형식이 아닙니다. 예: http://localhost:3001/mcp');
+      return;
+    }
+
+    onSelect('local', localEndpoint.trim());
+  };
 
   return (
     <Card elevation={3} sx={{ width: 560, maxWidth: '95vw' }}>
       <CardContent>
         <Stack spacing={3}>
           <Typography variant="h5" fontWeight={800}>
-            Notion MCP 연결 설정
+            Local MCP 연결 설정
           </Typography>
           <Typography color="text.secondary">
-            첫 실행 시, 사용할 MCP 서버 타입을 선택하세요. 선택 정보는 브라우저 localStorage에 저장되어 다음 실행에도 유지됩니다.
+            로컬 MCP 엔드포인트를 등록해두면, 이후 채팅창에서 지식 질의가 해당 MCP로 전달됩니다.
           </Typography>
 
-          <Chip label={chipLabel} color="primary" />
+          <TextField
+            label="Local MCP 엔드포인트"
+            fullWidth
+            value={localEndpoint}
+            onChange={(event) => setLocalEndpoint(event.target.value)}
+          />
 
-          <FormControl>
-            <FormLabel>연결 방식</FormLabel>
-            <RadioGroup
-              row
-              value={mode}
-              onChange={(event) => setMode(event.target.value as MCPMode)}
-            >
-              <FormControlLabel value="local" control={<Radio />} label="Local MCP" />
-              <FormControlLabel value="notion" control={<Radio />} label="Notion MCP" />
-            </RadioGroup>
-          </FormControl>
-
-          <Button variant="contained" onClick={() => onSelect(mode)} size="large">
+          <Button variant="contained" size="large" onClick={handleConnectLocalMCP}>
             연결 시작하기
           </Button>
+
+          {error ? <Alert severity="error">{error}</Alert> : null}
         </Stack>
       </CardContent>
     </Card>

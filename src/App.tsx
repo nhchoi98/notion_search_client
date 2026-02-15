@@ -1,22 +1,43 @@
 import { useState } from 'react';
-import { ThemeProvider, CssBaseline, Box, Stack } from '@mui/material';
-import MCPSetup from './components/McpSetup';
+import { Alert, Box, Stack, ThemeProvider, CssBaseline } from '@mui/material';
+import McpSetup from './components/McpSetup';
 import KnowledgeEditor from './components/KnowledgeEditor';
-import type { MCPMode } from './types/mcp';
+import type { MCPMode, LocalMCPConfig } from './types/mcp';
 import { theme } from './theme';
-import { readStoredMode, writeStoredMode, clearStoredMode } from './services/storage';
+import {
+  clearStoredLocalMCPConfig,
+  clearStoredMode,
+  readStoredLocalMCPConfig,
+  readStoredMode,
+  writeStoredLocalMCPConfig,
+  writeStoredMode,
+} from './services/storage';
+
+const defaultLocalConfig: LocalMCPConfig = {
+  endpoint: 'http://localhost:3001/mcp',
+};
 
 export default function App() {
   const [mode, setMode] = useState<MCPMode | null>(readStoredMode());
+  const [localConfig, setLocalConfig] = useState<LocalMCPConfig>(
+    readStoredLocalMCPConfig() || defaultLocalConfig,
+  );
 
-  const handleSelectMode = (nextMode: MCPMode) => {
+  const shouldShowSetup = !mode || !localConfig.endpoint;
+
+  const handleSelectMode = (nextMode: MCPMode, localEndpoint: string) => {
+    const nextConfig = { endpoint: localEndpoint };
     writeStoredMode(nextMode);
+    writeStoredLocalMCPConfig(nextConfig);
     setMode(nextMode);
+    setLocalConfig(nextConfig);
   };
 
   const handleDisconnect = () => {
     clearStoredMode();
+    clearStoredLocalMCPConfig();
     setMode(null);
+    setLocalConfig(defaultLocalConfig);
   };
 
   return (
@@ -32,10 +53,14 @@ export default function App() {
         }}
       >
         <Stack width="100%" alignItems="center">
-          {!mode ? (
-            <MCPSetup onSelect={handleSelectMode} />
+          {shouldShowSetup ? (
+            <McpSetup onSelect={handleSelectMode} />
           ) : (
-            <KnowledgeEditor mode={mode} onDisconnect={handleDisconnect} />
+            <KnowledgeEditor
+              mode={mode}
+              localEndpoint={localConfig.endpoint}
+              onDisconnect={handleDisconnect}
+            />
           )}
         </Stack>
       </Box>

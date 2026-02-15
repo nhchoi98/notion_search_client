@@ -1,34 +1,56 @@
-# Notion MCP Knowledge Client
+# Local MCP Knowledge Client
 
-React 19 + MUI로 만든 CSR 기반 Notion MCP 지식 탐색 클라이언트 예시입니다.
+React 19 + Vite + MUI + Express 기반으로 구성된 로컬 MCP 챗 인터페이스입니다.
 
 ## 실행
 
+백엔드 실행:
+
 ```bash
 pnpm install
+pnpm server
+```
+
+프론트 실행 (새 터미널):
+
+```bash
 pnpm dev
 ```
 
-## 스크립트
+## 환경변수
 
-- `pnpm dev`: 개발 서버 실행
-- `pnpm build`: 타입 검사 + 빌드
-- `pnpm lint`: ESLint 실행
-- `pnpm format`: Prettier 실행
-- `pnpm format:check`: Prettier 검사
+루트에 `.env` 생성 후 사용:
 
-## 구조
-
-- `src/components/McpSetup.tsx`: 최초 MCP 연결 방식 선택(로컬/Notion)
-- `src/components/KnowledgeEditor.tsx`: 에디터형 메인 화면 + 질의 로그
-- `src/services/mcpClient.ts`: GPT/MCP 호출 엔드포인트 교체 포인트
-- `src/services/storage.ts`: 로컬스토리지 기반 mode 저장/복원
-
-## React Compiler
-
-`vite.config.ts`에 react compiler Babel 플러그인 설정이 들어가 있습니다. 실제 사용 시
 ```bash
-babel-plugin-react-compiler
-eslint-plugin-react-compiler
+VITE_MCP_API_BASE_URL=http://localhost:4000
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-4o-mini
+LOCAL_MCP_TOKEN=your_local_mcp_token
+
+PORT=4000
+FRONT_ORIGIN=http://localhost:5173
+LOCAL_MCP_ENDPOINT=http://localhost:3001/mcp
 ```
-버전을 맞춰 설치합니다.
+
+## 동작
+
+1. 첫 화면에서 `로컬 MCP 엔드포인트` 입력 후 연결
+2. 채팅창에서 메시지 입력
+3. 프론트가 `/api/mcp/chat`를 호출
+4. 백엔드가 OpenAI에게 요청을 분석시켜, 필요 시 MCP 호출 여부를 판단
+5. 로컬 MCP가 필요한 경우 `LOCAL_MCP_ENDPOINT`(또는 화면에서 입력한 endpoint)로 요청을 전송
+6. 최종 답변/실행 액션을 챗 화면에 표시
+
+백엔드 라우트:
+
+- `POST /api/mcp/chat`: GPT 기반 라우터(요청 분기 + MCP 호출)
+- `POST /api/mcp/query`: 로컬 MCP 직접 호출 용도(내부/디버깅 용도)
+
+## 주요 파일
+
+- `server/index.js`: Express 브릿지 (로컬 MCP 호출 라우트)
+  - `POST /api/mcp/query`
+- `src/components/McpSetup.tsx`: 엔드포인트 등록 화면
+- `src/components/KnowledgeEditor.tsx`: ChatGPT 스타일 채팅 UI
+- `src/services/mcpClient.ts`: 프론트-브릿지 API 호출
+- `src/services/storage.ts`: 로컬 모드/엔드포인트 저장/복원
