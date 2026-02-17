@@ -86,6 +86,29 @@ const formatStructuredToolResult = (structuredPayload) => {
     return lines.join('\n').trim();
   }
 
+  if (Array.isArray(structuredPayload.docs)) {
+    if (structuredPayload.docs.length === 0) {
+      return '## 실행 결과\n- 검색 가능한 .md/.txt 문서를 찾지 못했습니다.';
+    }
+
+    const lines = ['## 문서 목록', `총 ${structuredPayload.docs.length}개 문서를 찾았습니다.`, ''];
+    for (const doc of structuredPayload.docs) {
+      if (typeof doc === 'string' && doc.trim()) {
+        lines.push(`- ${doc.trim()}`);
+        continue;
+      }
+
+      if (doc && typeof doc === 'object') {
+        const path = typeof doc.path === 'string' ? doc.path : typeof doc.file === 'string' ? doc.file : '';
+        if (path) {
+          lines.push(`- ${path}`);
+        }
+      }
+    }
+
+    return lines.join('\n').trim();
+  }
+
   if (Array.isArray(structuredPayload.hits)) {
     return formatHitsAsMarkdown(structuredPayload, '검색 결과');
   }
@@ -124,4 +147,3 @@ export const formatContentArrayAsMarkdown = (contentArrayPayload) => {
 
   return ['## MCP 응답', ...lines].join('\n');
 };
-

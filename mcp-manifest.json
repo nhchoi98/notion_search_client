@@ -1,0 +1,111 @@
+{
+  "schema_version": "2025-11-25",
+  "name": "knowledge-search-github-sync",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "sync_status",
+      "description": "GitHub 동기화 워크스페이스 상태를 조회합니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "string"
+          },
+          "remote_url": {
+            "type": "string"
+          },
+          "staged_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unstaged_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "untracked_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "is_clean": {
+            "type": "boolean"
+          },
+          "ready_for_pr": {
+            "type": "boolean"
+          },
+          "has_unpushed_commits": {
+            "type": "boolean"
+          },
+          "push_command": {
+            "type": "string"
+          },
+          "ready_for_pull": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "branch",
+          "workspace",
+          "remote_url",
+          "staged_files",
+          "unstaged_files",
+          "untracked_files",
+          "is_clean",
+          "ready_for_pr",
+          "has_unpushed_commits",
+          "push_command",
+          "ready_for_pull"
+        ]
+      }
+    },
+    {
+      "name": "create_pr",
+      "description": "staged 변경만 commit/push 후 GitHub PR을 생성합니다. 커밋/PR에는 bot 메타데이터를 포함할 수 있습니다.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "commit_message": {
+            "type": "string",
+            "minLength": 1,
+            "default": "Update knowledge (by bot)"
+          },
+          "base": {
+            "type": "string",
+            "default": "origin/main"
+          },
+          "bot_name": {
+            "type": "string",
+            "default": "knowledge-bot"
+          },
+          "requested_by": {
+            "type": "string",
+            "description": "요청자 식별자(예: user id, email). PR 본문/커밋 footer에 기록 가능합니다."
+          }
+        },
+        "required": [
+          "commit_message"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

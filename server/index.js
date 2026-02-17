@@ -8,6 +8,12 @@ import {
   summarizeStructuredForDisplay,
   formatContentArrayAsMarkdown,
 } from './lib/mcpResponseFormatting.js';
+import { hasSummaryIntent, findSummaryTool } from './lib/policies/summaryPolicy.js';
+import {
+  hasGitHubPRIntent,
+  evaluateGitHubPRReadiness,
+  buildGitHubPRWorkflowSteps,
+} from './lib/policies/githubPrPolicy.js';
 import {
   buildRouteDecisionPrompt,
   buildToolSelectionPrompt,
@@ -412,6 +418,12 @@ const collectPathsFromToolResult = (callResult) => {
     if (Array.isArray(structured.files)) {
       normalizeToolCandidates(structured.files, acc);
     }
+    if (Array.isArray(structured.docs)) {
+      normalizeToolCandidates(structured.docs, acc);
+    }
+    if (Array.isArray(structured.documents)) {
+      normalizeToolCandidates(structured.documents, acc);
+    }
     if (Array.isArray(structured.results)) {
       normalizeToolCandidates(structured.results, acc);
     }
@@ -445,36 +457,6 @@ const collectPathsFromToolResult = (callResult) => {
   return [...new Set(acc.filter(Boolean))];
 };
 
-const findSummaryTool = (tools = []) => {
-  const candidates = ['rebuild_summary', 'summary', 'summarize', 'rebuild'];
-  for (const name of candidates) {
-    const direct = tools.find((tool) => tool?.name === name);
-    if (direct) {
-      return direct;
-    }
-  }
-
-  return (
-    tools.find((tool) => {
-      const toolName = String(tool?.name || '').toLowerCase();
-      return candidates.some((name) => toolName.includes(name));
-    }) || null
-  );
-};
-
-const hasSummaryIntent = (prompt) => {
-  return typeof prompt === 'string'
-    ? /(요약|정리|요약해|정리해|summary|summar)/i.test(prompt)
-    : false;
-};
-
-const hasGitHubPRIntent = (prompt) => {
-  if (typeof prompt !== 'string') {
-    return false;
-  }
-  return /(pr|pull request|깃허브|github|동기화|sync|커밋|푸시|배포)/i.test(prompt);
-};
-
 const chooseBestTool = (tools = [], prompt = '') => {
   const text = prompt.toLowerCase();
   const ruleSets = [
@@ -500,6 +482,11 @@ const chooseBestTool = (tools = [], prompt = '') => {
   }
 
   return tools[0] || null;
+};
+
+const isSearchLikeTool = (toolName = '') => {
+  const name = String(toolName || '').toLowerCase();
+  return ['search', 'query', 'find', 'lookup'].some((keyword) => name.includes(keyword));
 };
 
 const normalizePathInput = (input = '') => {
@@ -561,7 +548,7 @@ const normalizeArrayArgument = (input) => {
 
 const getDefaultPaths = () => [...LOCAL_MCP_DEFAULT_PATHS];
 const getRetryPathCandidates = () => {
-  const candidates = [...getDefaultPaths(), 'notes/', '.', './'];
+  const candidates = [...getDefaultPaths(), 'notes/'];
   return [...new Set(candidates.map((item) => String(item || '').trim()).filter(Boolean))];
 };
 
@@ -932,6 +919,10 @@ const planExecutionFromManifest = async ({ prompt, routedQuery, localEndpoint })
   const query = routedQuery || prompt;
   const syncStatusTool = findToolByName(context.tools, 'sync_status');
   const createPRTool = findToolByName(context.tools, 'create_pr');
+  const pullTool =
+    findToolByName(context.tools, 'sync_pull') ||
+    findToolByName(context.tools, 'pull_changes') ||
+    findToolByName(context.tools, 'pull');
   if (hasGitHubPRIntent(query) && syncStatusTool && createPRTool) {
     const createPRArgs = sanitizeToolArguments(
       createPRTool,
@@ -945,13 +936,12 @@ const planExecutionFromManifest = async ({ prompt, routedQuery, localEndpoint })
         toolArguments: {},
         routedQuery: query,
         explanation: 'github_pr_workflow_precheck',
-        workflow: {
-          type: 'github_pr',
-          createPR: {
-            tool: createPRTool.name,
-            toolArguments: createPRArgs,
-          },
-        },
+        workflow: buildGitHubPRWorkflowSteps({
+          syncStatusToolName: syncStatusTool.name,
+          pullToolName: pullTool?.name || null,
+          createPRToolName: createPRTool.name,
+          createPRToolArguments: createPRArgs,
+        }),
       },
       context,
     };
@@ -1029,7 +1019,16 @@ const shouldRetryForPathIssue = (response) => {
   }
 
   const answer = typeof response.answer === 'string' ? response.answer : '';
-  return /(경로|path).*(없|누락|못 찾|찾기 어렵)/i.test(answer);
+  if (!answer) {
+    return false;
+  }
+
+  return (
+    /(경로|path).*(없|누락|못 찾|찾기 어렵|does not exist|invalid)/i.test(answer) ||
+    /no valid files/i.test(answer) ||
+    /invalid paths?/i.test(answer) ||
+    /use\s+list_docs/i.test(answer)
+  );
 };
 
 const buildRetryExecutionPlan = (executionPlan = null) => {
@@ -1053,58 +1052,6 @@ const buildRetryExecutionPlan = (executionPlan = null) => {
       ...(executionPlan.discovery || {}),
       expected_paths: fallbackPaths,
     },
-  };
-};
-
-const parseSyncStatusPayload = (response) => {
-  const candidate =
-    response && typeof response.result === 'object' && !Array.isArray(response.result)
-      ? response.result
-      : null;
-  if (candidate) {
-    return candidate;
-  }
-
-  if (typeof response?.answer === 'string') {
-    try {
-      const parsed = JSON.parse(response.answer);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed;
-      }
-    } catch {
-      // noop
-    }
-  }
-
-  return null;
-};
-
-const evaluateGitHubPRReadiness = (syncResponse) => {
-  const payload = parseSyncStatusPayload(syncResponse);
-  if (!payload) {
-    return {
-      canProceed: false,
-      reason: 'sync_status 결과 구조를 파싱하지 못했습니다.',
-      payload: null,
-    };
-  }
-
-  const isClean = payload.is_clean === true;
-  const readyForPr = payload.ready_for_pr === true;
-
-  if (!isClean || !readyForPr) {
-    return {
-      canProceed: false,
-      reason:
-        'PR 생성 전 작업공간 상태를 충족하지 못했습니다. staged/unstaged/untracked/ready_for_pr 상태를 확인해 주세요.',
-      payload,
-    };
-  }
-
-  return {
-    canProceed: true,
-    reason: '',
-    payload,
   };
 };
 
@@ -1342,7 +1289,7 @@ const callLocalMCP = async ({
   const plannedArgs = toolPlan?.toolArguments
     ? toolPlan.toolArguments
     : buildToolArguments(selectedTool, routedQuery);
-  const args = sanitizeToolArguments(selectedTool, routedQuery, plannedArgs, toolPlan?.routedQuery);
+  let args = sanitizeToolArguments(selectedTool, routedQuery, plannedArgs, toolPlan?.routedQuery);
   emitEvent('progress', {
     step: 'arguments_ready',
     tool: selectedTool?.name,
@@ -1474,7 +1421,7 @@ const callLocalMCP = async ({
     };
   }
 
-  const callResult = await callTool(selectedTool?.name, args, 'primary');
+  let callResult = await callTool(selectedTool?.name, args, 'primary');
   emitEvent('progress', {
     step: 'tool_call',
     tool: selectedTool?.name,
@@ -1501,10 +1448,77 @@ const callLocalMCP = async ({
     };
   }
 
-  const structured = callResult.parsed?.result?.structuredContent;
-  const contentArray = Array.isArray(callResult.parsed?.result?.content)
+  let structured = callResult.parsed?.result?.structuredContent;
+  let contentArray = Array.isArray(callResult.parsed?.result?.content)
     ? callResult.parsed.result.content
     : null;
+
+  // search 계열 도구에서 hits가 비어 있으면, list_docs로 .md/.txt 경로를 수집해 1회 재검색한다.
+  if (isSearchLikeTool(selectedTool?.name) && Array.isArray(structured?.hits) && structured.hits.length === 0) {
+    const searchDiscoveryTool =
+      findToolByName(tools, 'list_docs') || pickDiscoveryTool(tools, toolPlan?.discovery?.tool);
+    if (searchDiscoveryTool) {
+      const {
+        args: searchDiscoveryArgs,
+        result: searchDiscoveryResult,
+        paths: searchDiscoveryPaths,
+      } = await discoverPathsWithTool({
+        discoveryTool: searchDiscoveryTool,
+        routedQuery,
+        discoveryPlan: {
+          tool_arguments: {
+            paths: getRetryPathCandidates(),
+            extensions: ['.md', '.txt'],
+          },
+          expected_paths: getRetryPathCandidates(),
+        },
+        callTool,
+        requestType: 'search-discovery',
+      });
+
+      emitEvent('progress', {
+        step: 'search_discovery',
+        tool: searchDiscoveryTool?.name,
+        status: searchDiscoveryResult.status,
+      });
+
+      planTrace.searchDiscovery = {
+        tool: searchDiscoveryTool?.name || null,
+        args: searchDiscoveryArgs,
+        status: searchDiscoveryResult.status,
+        paths: searchDiscoveryPaths,
+      };
+
+      if (searchDiscoveryPaths.length > 0) {
+        const retrySearchArgs = sanitizeToolArguments(
+          selectedTool,
+          routedQuery,
+          {
+            ...args,
+            paths: searchDiscoveryPaths,
+          },
+          toolPlan?.routedQuery,
+        );
+
+        const retrySearchResult = await callTool(selectedTool?.name, retrySearchArgs, 'search-retry');
+        emitEvent('progress', {
+          step: 'search_retry',
+          tool: selectedTool?.name,
+          status: retrySearchResult.status,
+        });
+
+        if (retrySearchResult.status < 400 && !retrySearchResult.parsed?.error) {
+          args = retrySearchArgs;
+          callResult = retrySearchResult;
+          structured = callResult.parsed?.result?.structuredContent;
+          contentArray = Array.isArray(callResult.parsed?.result?.content)
+            ? callResult.parsed.result.content
+            : null;
+          planTrace.searchDiscovery.retried = true;
+        }
+      }
+    }
+  }
 
   const createResponseFromCallResult = (resultPayload) => {
     const structuredPayload = resultPayload?.parsed?.result?.structuredContent;
@@ -1588,7 +1602,8 @@ const callLocalMCP = async ({
     };
   };
 
-  const summaryTool = hasSummaryIntent(routedQuery) ? findSummaryTool(tools) : null;
+  const shouldTrySummaryChain = hasSummaryIntent(routedQuery);
+  const summaryTool = shouldTrySummaryChain ? findSummaryTool(tools) : null;
   if (summaryTool && selectedTool?.name !== summaryTool.name) {
     emitEvent('progress', {
       step: 'summary_chain_start',
