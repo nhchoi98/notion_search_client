@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppBar,
   Box,
@@ -7,13 +7,15 @@ import {
   Container,
   Divider,
   Paper,
-  List,
-  ListItem,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/github-dark.css';
 import type { MCPMode, KnowledgeMessage } from '../types/mcp';
 import { streamKnowledge } from '../services/mcpClient';
 
@@ -81,96 +83,128 @@ export default function KnowledgeEditor({
   };
 
   const renderMarkdown = (text: string) => {
-    const rawLines = text.split('\n');
-    const nodes: ReactNode[] = [];
-    let listItems: string[] = [];
-    let pendingBuffer: string[] = [];
-
-    const flushParagraph = () => {
-      if (pendingBuffer.length === 0) {
-        return;
-      }
-      nodes.push(
-        <Typography
-          key={`p-${nodes.length}`}
-          variant="body1"
-          sx={{
-            whiteSpace: 'pre-wrap',
-            display: 'block',
-            mt: 1,
-            lineHeight: 1.72,
-            color: '#0f172a',
-          }}
-        >
-          {pendingBuffer.join('\n')}
-        </Typography>,
-      );
-      pendingBuffer = [];
-    };
-
-    const flushList = () => {
-      if (listItems.length === 0) {
-        return;
-      }
-
-      nodes.push(
-        <List key={`ul-${nodes.length}`} dense sx={{ pl: 2, mt: 0.5 }}>
-          {listItems.map((item, index) => (
-            <ListItem
-              disableGutters
-              key={`li-${nodes.length}-${index}`}
-              sx={{ display: 'list-item', pl: 0.5 }}
+    return (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={{
+          p: ({ children }) => (
+            <Typography variant="body1" sx={{ mt: 1, lineHeight: 1.72, color: '#0f172a' }}>
+              {children}
+            </Typography>
+          ),
+          strong: ({ children }) => <Box component="strong">{children}</Box>,
+          em: ({ children }) => <Box component="em">{children}</Box>,
+          ul: ({ children }) => (
+            <Box component="ul" sx={{ m: 0, mt: 1, pl: 3 }}>
+              {children}
+            </Box>
+          ),
+          ol: ({ children }) => (
+            <Box component="ol" sx={{ m: 0, mt: 1, pl: 3 }}>
+              {children}
+            </Box>
+          ),
+          li: ({ children }) => (
+            <Box component="li" sx={{ mt: 0.4, color: '#0f172a', lineHeight: 1.65 }}>
+              {children}
+            </Box>
+          ),
+          blockquote: ({ children }) => (
+            <Box
+              sx={{
+                mt: 1,
+                px: 1.5,
+                py: 0.75,
+                borderLeft: '3px solid #d1d5db',
+                bgcolor: '#f9fafb',
+                borderRadius: 1,
+                color: '#374151',
+              }}
             >
-              <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', color: '#0f172a' }}>
-                {item}
-              </Typography>
-            </ListItem>
-          ))}
-        </List>,
-      );
-      listItems = [];
-    };
+              {children}
+            </Box>
+          ),
+          h1: ({ children }) => (
+            <Typography variant="h6" sx={{ mt: 1.6, mb: 0.6, fontWeight: 700, color: '#0f172a' }}>
+              {children}
+            </Typography>
+          ),
+          h2: ({ children }) => (
+            <Typography variant="subtitle1" sx={{ mt: 1.5, mb: 0.5, fontWeight: 700, color: '#0f172a' }}>
+              {children}
+            </Typography>
+          ),
+          h3: ({ children }) => (
+            <Typography variant="subtitle2" sx={{ mt: 1.3, mb: 0.4, fontWeight: 700, color: '#0f172a' }}>
+              {children}
+            </Typography>
+          ),
+          hr: () => <Divider sx={{ my: 1.5 }} />,
+          code: ({ className, children }) => {
+            const isBlock = className?.includes('language-') || String(children).includes('\n');
+            if (!isBlock) {
+              return (
+                <Box
+                  component="code"
+                  sx={{
+                    px: 0.6,
+                    py: 0.1,
+                    borderRadius: 1,
+                    bgcolor: '#f3f4f6',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    fontSize: '0.87em',
+                  }}
+                >
+                  {children}
+                </Box>
+              );
+            }
 
-    rawLines.forEach((line) => {
-      const headingMatch = /^(#{1,6})\s+(.*)$/.exec(line);
-      if (headingMatch) {
-        flushParagraph();
-        flushList();
-        const level = headingMatch[1].length;
-        const content = headingMatch[2];
-        nodes.push(
-          <Typography
-            key={`h-${nodes.length}`}
-            variant={level >= 3 ? 'subtitle2' : 'subtitle1'}
-            fontWeight={700}
-            sx={{ mt: 1.5, mb: 0.5, color: '#0f172a' }}
-          >
-            {content}
-          </Typography>,
-        );
-        return;
-      }
-
-      const listMatch = /^-\s+(.*)$/.exec(line);
-      if (listMatch) {
-        flushParagraph();
-        listItems.push(listMatch[1]);
-        return;
-      }
-
-      if (line.trim() === '') {
-        flushParagraph();
-        flushList();
-        return;
-      }
-
-      pendingBuffer.push(line);
-    });
-
-    flushParagraph();
-    flushList();
-
-    return nodes.length > 0 ? nodes : <Typography variant="body1">{text}</Typography>;
+            const langLabel = (className || '').replace('hljs', '').match(/language-([\w-]+)/)?.[1] || '';
+            return (
+              <Box
+                sx={{
+                  mt: 1,
+                  mb: 1,
+                  borderRadius: 2,
+                  border: '1px solid #e5e7eb',
+                  bgcolor: '#0d1117',
+                  color: '#f9fafb',
+                  overflowX: 'auto',
+                }}
+              >
+                {langLabel ? (
+                  <Typography
+                    variant="caption"
+                    sx={{ display: 'block', px: 1.25, pt: 0.75, color: '#9ca3af' }}
+                  >
+                    {langLabel}
+                  </Typography>
+                ) : null}
+                <Box
+                  component="pre"
+                  sx={{
+                    m: 0,
+                    p: 1.25,
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    whiteSpace: 'pre',
+                  }}
+                >
+                  <Box component="code" className={className}>
+                    {children}
+                  </Box>
+                </Box>
+              </Box>
+            );
+          },
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    );
   };
 
   const submit = async () => {
@@ -383,12 +417,13 @@ export default function KnowledgeEditor({
                 >
                   <Box
                     sx={{
-                      px: isUser ? 2.2 : 0,
-                      py: isUser ? 1.5 : 0.25,
+                      px: 2.2,
+                      py: 1.5,
                       borderRadius: 6,
                       maxWidth: { xs: '92%', md: '82%' },
-                      background: isUser ? '#f4f4f5' : 'transparent',
-                      border: isUser ? '1px solid #ececf1' : 'none',
+                      background: isUser ? '#f4f4f5' : '#ffffff',
+                      border: isUser ? '1px solid #ececf1' : '1px solid #e5e7eb',
+                      boxShadow: isUser ? 'none' : '0 2px 8px rgba(0,0,0,0.04)',
                     }}
                   >
                     {renderMarkdown(message.text)}
